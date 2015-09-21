@@ -1,0 +1,230 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_LEDBackpack.h>
+
+
+#define MATRIX_EYES 0
+#define echoPin 7 // Echo Pin
+#define trigPin 8 // Trigger Pin
+long distance, duration;
+//Adafruit_BicolorMatrix matrix[1] = {Adafruit_BicolorMatrix() };
+Adafruit_BicolorMatrix matrix = Adafruit_BicolorMatrix();
+//static const uint8_t matrixAddr[] = { 0x70 };
+
+//connecting VCC pin from sensor directly to 5V pin in Arduino makes it work but does not work well on breadboard
+
+static const uint8_t PROGMEM // Bitmaps are stored in program memory
+  gazingImg[][8] = {    // Eye animation frames
+  { B00111100,         // Fully open eye
+    B01111110,
+    B11111111,
+    B11111111,
+    B11111111,
+    B11111111,
+    B01111110,
+    B00111100 },
+  { B00000000,
+    B01111110,
+    B11111111,
+    B11111111,
+    B11111111,
+    B11111111,
+    B01111110,
+    B00111100 },
+  { B00000000,
+    B00000000,
+    B00111100,
+    B11111111,
+    B11111111,
+    B11111111,
+    B00111100,
+    B00000000 },
+  { B00000000,
+    B00000000,
+    B00000000,
+    B00111100,
+    B11111111,
+    B01111110,
+    B00011000,
+    B00000000 },
+  { B00000000,         // Fully closed eye
+    B00000000,
+    B00000000,
+    B00000000,
+    B10000001,
+    B01111110,
+    B00000000,
+    B00000000 } },
+  emotionImg [] [8] = {
+  { B00000000,
+    B00000000,
+    B00011000,
+    B00100100,  //happy
+    B01000010,
+    B00000000,
+    B00000000,
+    B00000000},
+  { B00000000,
+    B00111100,
+    B01000010,
+    B01011010, //neutral
+    B01011010,
+    B01000010,
+    B00111100,
+    B00000000 },
+  {B00000000,
+   B00000000,
+   B00000000,   //angry
+   B00111100,
+   B01011010,
+   B01011010,
+   B00100100,
+   B00011000 },
+  { B00000000,
+    B00011000,
+    B00100100,
+    B01011010,    // surprised
+    B01011010,
+    B00100100,
+    B00011000,
+    B00000000 },
+  {B00000000,
+   B00000000,
+   B00011000,
+   B00100100,   //sad
+   B01000010,
+   B01001010,
+   B00100100,
+   B00011000 },
+  { B01100110,
+    B10011001,
+    B10000001,
+    B10011001,   //love
+    B10011001,
+    B01000010,
+    B00100100,
+    B00011000 },
+  { B00000000,
+    B00000000,
+    B00000000,  //relaxed
+    B00000000,
+    B01000010,
+    B00100100,
+    B00011000,
+    B00000000 } };
+
+uint8_t
+  blinkIndex[] = { 1, 2, 3, 4, 3, 2, 1 }, // Blink bitmap sequence
+  blinkCountdown = 100, // Countdown to next blink (in frames)
+  blinkCount = 0,
+  gazeCountdown  =  75, // Countdown to next eye movement
+  gazeFrames     =  50; // Duration of eye movement (smaller = faster)
+int8_t
+  eyeX = 3, eyeY = 3,   // Current eye position
+  newX = 3, newY = 3,   // Next eye position
+  dX   = 0, dY   = 0;   // Distance from prior to new position
+boolean left = false;
+boolean enterEmotions = false;
+int underThirty = 0;
+uint8_t emotionCounter = 300;
+boolean firstEntry = false;
+
+void setup() {
+  // put your setup code here, to run once:
+  //Serial.begin (9600);
+  randomSeed(analogRead(A0));
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+ // matrix[0].begin(matrixAddr[0]);
+  matrix.begin(0x70);         // adding the matrix begin lines makes the serial print for sensor stop working
+  matrix.setRotation(3);
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+ 
+ if(sensorReading() < 30) {
+  underThirty++;
+
+  if(underThirty > 10) {
+  matrix.clear();
+  matrix.drawBitmap(0, 0, gazingImg[(blinkCountdown < sizeof(blinkIndex)) ? blinkIndex[blinkCountdown] : 0], 8, 8, LED_GREEN);
+  if (--blinkCountdown == 0 ) blinkCountdown = random(5, 180);
+
+  if (--gazeCountdown <= gazeFrames) {
+    matrix.fillRect(newX - (dX * gazeCountdown / gazeFrames), newY - (dY * gazeCountdown / gazeFrames), 2, 2, LED_OFF);
+    if(gazeCountdown == 0 ) {
+      eyeX = newX; eyeY = newY;
+      if(left == false) {
+        newX = 5;
+        newY = 3;
+        left = true;
+      } else {
+        newX = 3;
+        newY = 3;
+        left = false;
+      }
+      dX = newX - eyeX;
+      dY = newY - eyeY;
+      gazeFrames = random(3, 15);
+      gazeCountdown = random(gazeFrames, 120);
+      }
+    } else {
+      matrix.fillRect(eyeX, eyeY, 2, 2, LED_OFF);
+      Serial.println(sensorReading());
+    }
+    matrix.writeDisplay();
+    //enterEmotions = true;
+    firstEntry = true;
+  }
+  } else {
+    underThirty = 0;
+    if (firstEntry == true) {
+      emotionCounter = 3;
+      firstEntry = false;
+    }
+    if(--emotionCounter == 0) {
+      matrix.clear();
+      int prevBlink = blinkCount;
+      if (blinkCount == 0 || blinkCount == 3 || blinkCount ==6) {
+          matrix.drawBitmap(0, 0, emotionImg[blinkCount], 8, 8, LED_GREEN);
+      } else if ( blinkCount == 4 || blinkCount == 1) {
+          matrix.drawBitmap(0, 0, emotionImg[blinkCount], 8, 8, LED_YELLOW);
+      } else if (blinkCount == 2 || blinkCount == 5){
+          matrix.drawBitmap(0, 0, emotionImg[blinkCount], 8, 8, LED_RED);
+      }
+      
+      emotionCounter = 300;
+      do {
+          blinkCount = random(6);
+      } while (blinkCount == prevBlink);
+      /*
+      if(enterEmotions == true) {
+        matrix.writeDisplay();
+        enterEmotions = false;
+      }
+      */
+      matrix.writeDisplay();
+    }
+  }
+ 
+ 
+ delay(20);
+}
+
+long sensorReading() {
+  digitalWrite(trigPin, LOW); 
+ delayMicroseconds(2); 
+
+ digitalWrite(trigPin, HIGH);
+ delayMicroseconds(10); 
+ 
+ digitalWrite(trigPin, LOW);
+ duration = pulseIn(echoPin, HIGH);
+ 
+ //Calculate the distance (in cm) based on the speed of sound.
+ distance = duration/58.2;
+ return distance;
+}
+
